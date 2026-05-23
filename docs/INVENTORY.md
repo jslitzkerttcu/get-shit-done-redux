@@ -361,7 +361,7 @@ The `gsd-planner` agent is decomposed into a core agent plus reference modules t
 
 ---
 
-## CLI Modules (74 shipped)
+## CLI Modules (77 shipped)
 
 Full listing: `get-shit-done/bin/lib/*.cjs`.
 
@@ -404,7 +404,10 @@ Full listing: `get-shit-done/bin/lib/*.cjs`.
 | `model-catalog.cjs` | CJS adapter over the shared model catalog JSON; exports canonical runtime tier defaults, agent profile maps, alias maps, and routing metadata for all CLI consumers |
 | `model-profiles.cjs` | Backward-compatible profile helpers derived from `model-catalog.cjs`; no longer owns its own model table |
 | `phase-command-router.cjs` | Thin CJS subcommand router adapter for `gsd-tools phase` |
+| `phase-lifecycle-policy.generated.cjs` | GENERATED — CJS artifact emitted from `sdk/src/query/phase-lifecycle-policy.ts` via `sdk/scripts/gen-phase-lifecycle-policy.mjs`; pure computation helpers for phase directory naming, roadmap entry generation, decimal-phase management, and ID computation; do not edit directly |
+| `phase-lifecycle.generated.cjs` | GENERATED — CJS artifact emitted from `sdk/src/query/phase-lifecycle.ts` via `sdk/scripts/gen-phase-lifecycle.mjs`; pure-computation phase lifecycle helpers extracted from the phase-lifecycle SDK handler; do not edit directly |
 | `phase.cjs` | Phase directory operations, decimal numbering, plan indexing |
+| `phase.generated.cjs` | GENERATED — CJS artifact emitted from `sdk/src/query/phase.ts` via `sdk/scripts/gen-phase.mjs`; pure helper functions for phase query shared between the CJS CLI and SDK; no I/O, no async, no filesystem operations; do not edit directly |
 | `phases-command-router.cjs` | Thin CJS subcommand router adapter for `gsd-tools phases` |
 | `plan-scan.cjs` | CJS shim adapter — re-exports from `plan-scan.generated.cjs` (Phase 6/#3575 Shared Module migration) |
 | `plan-scan.generated.cjs` | GENERATED — CJS artifact emitted from `sdk/src/query/plan-scan.ts` via `sdk/scripts/gen-plan-scan.mjs`; canonical phase-plan scanner for detecting plan and summary files in flat and nested layouts (k014); do not edit directly |
