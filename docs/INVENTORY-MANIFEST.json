@@ -1,5 +1,5 @@
 {
-  "generated": "2026-05-21",
+  "generated": "2026-05-23",
   "families": {
     "agents": [
       "gsd-advisor-researcher",
@@ -310,6 +310,7 @@
       "roadmap.cjs",
       "runtime-artifact-layout.cjs",
       "runtime-homes.cjs",
+      "runtime-name-policy.cjs",
       "runtime-slash.cjs",
       "schema-detect.cjs",
       "schema-detect.generated.cjs",
