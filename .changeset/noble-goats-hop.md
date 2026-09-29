@@ -1,6 +1,6 @@
 ---
 type: Changed
-pr: 0
+pr: 5110
 ---
 **`/gsd-fast` now appears in the generated CLAUDE.md entry-point list** — listed ahead of `/gsd-quick` as the lightest entry point for a trivial, one-sentence task with no subagents and no PLAN.md.
 
