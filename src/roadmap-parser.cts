@@ -1849,13 +1849,35 @@ function getMilestoneInfo(cwd?: string): { value: MilestoneInfo | null; scope: S
     if (roadmap === null) throw new Error('missing');
 
     let stateVersion: string | null = null;
+    // #5038: distinct from `stateVersion` staying null because the
+    // `milestone:` key is simply ABSENT. Set true only when the key is
+    // PRESENT and its value is the literal text "null" — a deliberate
+    // "no milestone right now" assertion, not an unset field. This gates
+    // the ROADMAP auto-derivation fallback below: that fallback exists to
+    // BOOTSTRAP an initial milestone identity for a project that has never
+    // mentioned one, and must not silently overwrite an explicit null with
+    // a guessed one on every rewrite (`state sync`, `record-session`, ...).
+    let explicitlyNoMilestone = false;
     if (cwd) {
       try {
         const statePath = path.join(planningDir(cwd), 'STATE.md');
         const stateRaw = platformReadSync(statePath);
         if (stateRaw !== null) {
           const m = stateRaw.match(/^milestone:\s*(.+)/m);
-          if (m) stateVersion = m[1].trim();
+          if (m) {
+            const v = m[1].trim();
+            // #5038: `milestone: null` is YAML null, not the 4-character
+            // string "null" — without this, every downstream consumer of
+            // stateVersion treated the literal string as a real asserted
+            // milestone version matching no ROADMAP heading. Mirrors the
+            // established normalization convention in
+            // ~/.claude/hooks/gsd-statusline.js (`v === 'null' ? null : v`).
+            if (v === 'null') {
+              explicitlyNoMilestone = true;
+            } else {
+              stateVersion = v;
+            }
+          }
         }
       } catch {
         /* best-effort (#2245 audit): platformReadSync re-throws for a non-ENOENT
@@ -1915,6 +1937,20 @@ function getMilestoneInfo(cwd?: string): { value: MilestoneInfo | null; scope: S
       // no 🚧 bullet, no usable heading (absent, phase-only-excluded, shipped,
       // or heading-but-nameless). §7.2 rule 4 — never fabricate a name.
       return scoped({ version: stateVersion, name: null }, SCOPE.TRUNCATED);
+    }
+
+    // #5038: STATE.md's `milestone:` key is PRESENT and explicitly asserts no
+    // milestone (`milestone: null`) — a deliberate assertion, not an unset
+    // field. Return null/UNSCOPED directly rather than falling into the
+    // ROADMAP auto-derivation fallback below: that fallback exists to
+    // BOOTSTRAP an initial milestone identity for a project whose STATE.md
+    // has never mentioned `milestone:` at all, and running it here would
+    // silently replace the explicit null with a guessed heading/bullet
+    // version on every rewrite (`state sync`, `record-session`, ...) —
+    // exactly the behavior the caller-side withhold in state.cts depends on
+    // NOT happening.
+    if (explicitlyNoMilestone) {
+      return scoped(null, SCOPE.UNSCOPED);
     }
 
     // No STATE.md version. The 🚧 in-progress bullet is still consulted first
