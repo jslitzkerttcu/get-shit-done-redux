@@ -1870,8 +1870,8 @@ function getMilestoneInfo(cwd?: string): { value: MilestoneInfo | null; scope: S
             // string "null" — without this, every downstream consumer of
             // stateVersion treated the literal string as a real asserted
             // milestone version matching no ROADMAP heading. Mirrors the
-            // established normalization convention in
-            // ~/.claude/hooks/gsd-statusline.js (`v === 'null' ? null : v`).
+            // established normalization convention in the statusline
+            // hook's own STATE.md parser (`v === 'null' ? null : v`).
             if (v === 'null') {
               explicitlyNoMilestone = true;
             } else {
