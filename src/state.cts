@@ -3033,13 +3033,20 @@ function buildStateFrontmatter(
           // The ROADMAP scope + the deduped, milestone-scoped disk phase set:
           // one owner (scanStatePhaseDirs, above buildStateFrontmatter) so the
           // #5118 pre-write validation in `phase remove` reads exactly this set.
+          // #5038 review finding 2: `storedMilestone` is the literal string
+          // "null" for an explicit-null STATE.md (FAILSAFE_SCHEMA, see
+          // isMilestoneExplicitlyNull's doc comment), not a real milestone
+          // version. Passed raw, it would flow into listMilestonePhaseDirs'
+          // versionOverride filter and mis-scope the phase-dir set on a flat
+          // roadmap. Normalize to a real null here, the single place this
+          // value crosses into the disk-scan filter.
           const {
             phaseDirs,
             phaseDirScope,
             roadmapScope,
             roadmapRaw,
             retiredPhaseNums,
-          } = scanStatePhaseDirs(cwd, phasesDir, phaseConvention, storedMilestone);
+          } = scanStatePhaseDirs(cwd, phasesDir, phaseConvention, milestoneExplicitlyNull ? null : storedMilestone);
 
           let diskTotalPlans = 0;
           let diskTotalSummaries = 0;
@@ -6288,13 +6295,13 @@ function cmdStateSync(cwd: string, options: StateSyncOptions | undefined, raw: b
   // set — leave Progress untouched (percent=null) rather than silently writing
   // fallback-derived wrong values. Projects without a milestone version (the common
   // sync-test shape) are unaffected: the gate only fires when a version is asserted.
-  const fmVersion = (extractFrontmatter(content, statePath) as Record<string, unknown>).milestone;
-  // #5038: the write-path twin of `isMilestoneExplicitlyNull` — `extractFrontmatter`
-  // parses frontmatter scalars under js-yaml's FAILSAFE_SCHEMA (src/frontmatter.cts),
-  // which never resolves the bare word `null` to a real JS `null`, so an explicit
-  // `milestone: null` parses to the literal STRING "null" here, same as
-  // getMilestoneInfo's raw-regex read of the same line before its own #5038 fix.
-  const milestoneExplicitlyNull = typeof fmVersion === 'string' && fmVersion.trim() === 'null';
+  const syncFm = extractFrontmatter(content, statePath) as Record<string, unknown>;
+  const fmVersion = syncFm.milestone;
+  // #5038 review finding 3: reuse the single owner of "is this frontmatter's
+  // milestone key an explicit YAML null" rather than re-deriving the same
+  // literal-string check inline (they had already drifted into two call
+  // sites parsing the identical FAILSAFE_SCHEMA shape).
+  const milestoneExplicitlyNull = isMilestoneExplicitlyNull(syncFm);
   const versionStr = typeof fmVersion === 'string' && fmVersion.trim() && !milestoneExplicitlyNull ? fmVersion.trim() : null;
   let milestoneBounded = true;
   if (versionStr !== null && syncRoadmapRaw !== null) {

@@ -2913,6 +2913,15 @@ describe('#5038 explicit `milestone: null` — no false warning, counters withhe
     );
     assert.strictEqual(parsed.progress.total_phases, 3,
       `a flat (unsectioned) roadmap has nothing to conflate — total_phases must be the whole-document heading count (3), not the withheld stored sentinel (${LOW_STORED_TOTAL_PHASES}) or the disk count (1). Got ${parsed.progress.total_phases}`);
+    // Review finding 2 (#5111): the literal string "null" must never reach
+    // listMilestonePhaseDirs' versionOverride filter — passed raw, it is
+    // truthy and is read as a request to scope to a milestone section
+    // literally named "null", mis-scoping the disk phase-dir set even on a
+    // flat (unsectioned) roadmap that has no such section. completed_phases
+    // is derived from that same disk scan (no ROADMAP Progress table exists
+    // in FLAT_ROADMAP to float it), so a mis-scoped filter surfaces here.
+    assert.strictEqual(parsed.progress.completed_phases, LOW_STORED_COMPLETED_PHASES,
+      `completed_phases must derive from the correctly-scoped disk scan (0, no phase verified complete), not be disturbed by the literal "null" reaching the phase-dir version filter. Got ${parsed.progress.completed_phases}`);
   });
 
   test('case 3 (negative control): a real unbound version still warns AND withholds', () => {
