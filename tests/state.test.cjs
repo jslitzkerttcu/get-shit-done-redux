@@ -3049,39 +3049,12 @@ describe('cmdStateUpdateProgress (state update-progress)', () => {
     assert.strictEqual(output.completed, 1, 'completed must be v2.0-scoped (phase 02 only)');
   });
 
-  test('#5038 review finding 3: explicit `milestone: null` never surfaces the asserted-but-unbound warning on `state update-progress`', () => {
-    // #5038's fix threads `isMilestoneExplicitlyNull` through buildStateFrontmatter
-    // at every call site, including computeUpdateProgressPreview (this command's
-    // own percent source). Traced (not assumed) while writing this: cmdStateUpdateProgress
-    // has an EARLIER gate of its own (the #3217 phaseScope check, line ~1504)
-    // that resolves the ambient current-milestone window via
-    // extractCurrentMilestoneScoped (roadmap-parser.cts) — which reads STATE.md's
-    // `milestone:` line with a raw regex, NOT isMilestoneExplicitlyNull. For an
-    // explicit `milestone: null` that raw read sees the literal string "null" as
-    // a real (if unbound) asserted version, so phaseScope always resolves
-    // SCOPE.UNSCOPED and this gate intercepts BEFORE computeUpdateProgressPreview
-    // ever runs — regardless of ROADMAP shape. This is a same-class gap #5038
-    // does not reach (a pre-existing, unrelated call site), tracked separately
-    // rather than folded into this fix silently. What this test pins is the
-    // outward guarantee #5038 promises everywhere else: an explicit null must
-    // never produce the confusing "matches no ROADMAP heading" warning text,
-    // even though — here — the withhold fires one gate earlier than expected.
+  test('#5038: explicit `milestone: null` on a flat ROADMAP resolves a complete phase scope, so update-progress writes', () => {
+    // Before #5038 the raw `milestone:` read in extractCurrentMilestoneScoped saw the text
+    // "null" as a version with no heading and the scope gate withheld the write.
     fs.writeFileSync(
       path.join(tmpDir, '.planning', 'ROADMAP.md'),
-      [
-        '# Roadmap',
-        '',
-        '## v1.0: First',
-        '',
-        '### Phase 01: Alpha',
-        '**Goal:** ship it.',
-        '',
-        '## v2.0: Second',
-        '',
-        '### Phase 02: Beta',
-        '**Goal:** ship more.',
-        '',
-      ].join('\n')
+      ['# Roadmap', '', '### Phase 01: Alpha', '**Goal:** ship it.', ''].join('\n')
     );
     fs.writeFileSync(
       path.join(tmpDir, '.planning', 'STATE.md'),
@@ -3091,6 +3064,7 @@ describe('cmdStateUpdateProgress (state update-progress)', () => {
     const phase01Dir = path.join(tmpDir, '.planning', 'phases', '01');
     fs.mkdirSync(phase01Dir, { recursive: true });
     fs.writeFileSync(path.join(phase01Dir, '01-01-PLAN.md'), '# Plan\n');
+    fs.writeFileSync(path.join(phase01Dir, '01-01-SUMMARY.md'), '# Summary\n');
 
     const { runNode } = require('./helpers/process-seam.cjs');
     const { PROBE_TIMEOUT_MS } = require('./helpers/timeouts.cjs');
@@ -3100,16 +3074,9 @@ describe('cmdStateUpdateProgress (state update-progress)', () => {
       { cwd: tmpDir, env: { ...process.env, ...TEST_ENV_BASE }, timeoutMs: PROBE_TIMEOUT_MS },
     );
     assert.equal(rec.exitCode, 0, `Command failed: ${rec.stderr}`);
-    assert.ok(
-      !(rec.stderr || '').includes('matches no ROADMAP heading'),
-      `explicit milestone: null must never produce the asserted-but-unbound warning; got stderr=${JSON.stringify(rec.stderr)}`,
-    );
     const output = JSON.parse(rec.stdout);
-    assert.strictEqual(output.updated, false, 'a sectioned ROADMAP + explicit null cannot be scoped — must withhold (updated:false)');
-    assert.ok(
-      /not complete/i.test(String(output.reason)),
-      `should explain the withhold via the phaseScope gate; got reason: ${output.reason}`
-    );
+    assert.strictEqual(output.updated, true, `scope gate must not withhold; got ${rec.stdout}`);
+    assert.strictEqual(output.total, 1);
   });
 });
 
