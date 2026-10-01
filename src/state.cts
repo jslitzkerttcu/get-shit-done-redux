@@ -39,7 +39,7 @@ const {
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import roadmapParserMod = require('./roadmap-parser.cjs');
 // #3642: hasMilestoneSectioning no longer consumed here — its >=2 semantics answered sibling conflation, but this branch asks asserted-vs-section (>=1). It stays exported from roadmap-parser.cjs for its unit pins.
-const { getMilestoneInfo, extractCurrentMilestone, isMilestoneBoundedInRoadmap, hasAnyMilestoneSection } = roadmapParserMod;
+const { getMilestoneInfo, extractCurrentMilestone, isMilestoneBoundedInRoadmap, hasAnyMilestoneSection, classifyMilestoneScalar } = roadmapParserMod;
 import { platformWriteSync, platformReadSync, platformEnsureDir, retryRenameSync, toPosixPath, execGit } from './shell-command-projection.cjs';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import planningWorkspace = require('./planning-workspace.cjs');
@@ -2897,7 +2897,7 @@ function scanStatePhaseDirs(
  */
 function isMilestoneExplicitlyNull(existingFm: Record<string, unknown>): boolean {
   const raw = existingFm['milestone'];
-  return typeof raw === 'string' && raw.trim() === 'null';
+  return typeof raw === 'string' && classifyMilestoneScalar(raw).explicitNull;
 }
 
 /**

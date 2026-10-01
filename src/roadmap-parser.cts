@@ -1012,6 +1012,24 @@ const PHASE_HEADING_BLOCK_STRIP_RE = new RegExp(
  *   expose it (its 20 callers are not the scope-axis consumers; V005's
  *   router site and `getMilestonePhaseFilter` resolve and thread it).
  */
+/**
+ * #5038: single owner for classifying a `milestone:` scalar as STATE.md spells
+ * it. The frontmatter parser (FAILSAFE_SCHEMA) and the raw-regex readers both
+ * see YAML null as text, so every reader classifies it here. Recognizes the
+ * YAML 1.2 core-schema null spellings (`null`, `Null`, `NULL`, `~`) with an
+ * optional trailing ` # comment` and optional surrounding quotes (the
+ * frontmatter parser has already stripped them, so the raw readers must agree);
+ * a blank value is absent, not null.
+ */
+function classifyMilestoneScalar(raw: string | null | undefined): { explicitNull: boolean; version: string | null } {
+  if (typeof raw !== 'string') return { explicitNull: false, version: null };
+  const trimmed = raw.trim();
+  if (trimmed === '') return { explicitNull: false, version: null };
+  const bare = trimmed.replace(/\s+#.*$/, '').trim().replace(/^(['"])(.*)\1$/, '$2');
+  if (/^(?:null|Null|NULL|~)$/.test(bare)) return { explicitNull: true, version: null };
+  return { explicitNull: false, version: trimmed };
+}
+
 function extractCurrentMilestoneScoped(content: string, cwd?: string, ws?: string | null, phaseIdConvention?: string | null): { value: string; scope: Scope } {
   if (!cwd) {
     // Row 1: a deliberate unscoped read (no cwd supplied) is a real answer —
@@ -1020,18 +1038,23 @@ function extractCurrentMilestoneScoped(content: string, cwd?: string, ws?: strin
   }
 
   let version: string | null = null;
+  let stateAssertsNoMilestone = false;
   try {
     const statePath = path.join(planningDir(cwd, ws), 'STATE.md');
     const stateRaw = platformReadSync(statePath);
     if (stateRaw !== null) {
       const milestoneMatch = stateRaw.match(/^milestone:\s*(.+)/m);
       if (milestoneMatch) {
-        version = milestoneMatch[1].trim();
+        const classified = classifyMilestoneScalar(milestoneMatch[1]);
+        version = classified.version;
+        stateAssertsNoMilestone = classified.explicitNull;
       }
     }
   } catch { /* ignore */ }
 
-  if (!version) {
+  // #5038: an explicit `milestone: null` is a deliberate "no milestone" — do
+  // not let the in-progress bullet guess one (same stance as getMilestoneInfo).
+  if (!version && !stateAssertsNoMilestone) {
     const inProgressMatch = content.match(/(?:🚧|🔄)\s*\*\*v(\d+\.\d+)\s/);
     if (inProgressMatch) {
       version = 'v' + inProgressMatch[1];
@@ -1865,18 +1888,12 @@ function getMilestoneInfo(cwd?: string): { value: MilestoneInfo | null; scope: S
         if (stateRaw !== null) {
           const m = stateRaw.match(/^milestone:\s*(.+)/m);
           if (m) {
-            const v = m[1].trim();
             // #5038: `milestone: null` is YAML null, not the 4-character
-            // string "null" — without this, every downstream consumer of
-            // stateVersion treated the literal string as a real asserted
-            // milestone version matching no ROADMAP heading. Mirrors the
-            // established normalization convention in the statusline
-            // hook's own STATE.md parser (`v === 'null' ? null : v`).
-            if (v === 'null') {
-              explicitlyNoMilestone = true;
-            } else {
-              stateVersion = v;
-            }
+            // string "null" — classified by the shared owner so every reader
+            // agrees on what counts as null.
+            const classified = classifyMilestoneScalar(m[1]);
+            explicitlyNoMilestone = classified.explicitNull;
+            stateVersion = classified.version;
           }
         }
       } catch {
@@ -2336,15 +2353,20 @@ function currentMilestoneRawRanges(
   if (!cwd) return null;
 
   let version: string | null = null;
+  let stateAssertsNoMilestone = false;
   try {
     const statePath = path.join(planningDir(cwd), 'STATE.md');
     const stateRaw = platformReadSync(statePath);
     if (stateRaw !== null) {
       const milestoneMatch = stateRaw.match(/^milestone:\s*(.+)/m);
-      if (milestoneMatch) version = milestoneMatch[1].trim();
+      if (milestoneMatch) {
+        const classified = classifyMilestoneScalar(milestoneMatch[1]);
+        version = classified.version;
+        stateAssertsNoMilestone = classified.explicitNull;
+      }
     }
   } catch { /* ignore */ }
-  if (!version) {
+  if (!version && !stateAssertsNoMilestone) {
     const inProgressMatch = content.match(/(?:🚧|🔄)\s*\*\*v(\d+\.\d+)\s/);
     if (inProgressMatch) version = 'v' + inProgressMatch[1];
   }
@@ -2392,6 +2414,7 @@ export = {
   replaceInCurrentMilestone,
   getRoadmapPhaseInternal,
   getMilestoneInfo,
+  classifyMilestoneScalar,
   getMilestonePhaseFilter,
   currentMilestoneRawRanges,
   withPhaseSection,
