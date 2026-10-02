@@ -986,6 +986,24 @@ const PHASE_HEADING_BLOCK_STRIP_RE = new RegExp(
 );
 
 /**
+ * #5038: single owner for classifying a `milestone:` scalar as STATE.md spells
+ * it. The frontmatter parser (FAILSAFE_SCHEMA) and the raw-regex readers both
+ * see YAML null as text, so every reader classifies it here. Recognizes the
+ * YAML 1.2 core-schema null spellings (`null`, `Null`, `NULL`, `~`) with an
+ * optional trailing ` # comment` and optional surrounding quotes (the
+ * frontmatter parser has already stripped them, so the raw readers must agree);
+ * a blank value is absent, not null.
+ */
+function classifyMilestoneScalar(raw: string | null | undefined): { explicitNull: boolean; version: string | null } {
+  if (typeof raw !== 'string') return { explicitNull: false, version: null };
+  const trimmed = raw.trim();
+  if (trimmed === '') return { explicitNull: false, version: null };
+  const bare = trimmed.replace(/\s+#.*$/, '').trim().replace(/^(['"])(.*)\1$/, '$2');
+  if (/^(?:null|Null|NULL|~)$/.test(bare)) return { explicitNull: true, version: null };
+  return { explicitNull: false, version: trimmed };
+}
+
+/**
  * Extract the current milestone section from ROADMAP.md by positive lookup,
  * carrying a `scope` discriminator (ADR-3180 Decision 2) alongside the value.
  *
@@ -1012,24 +1030,6 @@ const PHASE_HEADING_BLOCK_STRIP_RE = new RegExp(
  *   expose it (its 20 callers are not the scope-axis consumers; V005's
  *   router site and `getMilestonePhaseFilter` resolve and thread it).
  */
-/**
- * #5038: single owner for classifying a `milestone:` scalar as STATE.md spells
- * it. The frontmatter parser (FAILSAFE_SCHEMA) and the raw-regex readers both
- * see YAML null as text, so every reader classifies it here. Recognizes the
- * YAML 1.2 core-schema null spellings (`null`, `Null`, `NULL`, `~`) with an
- * optional trailing ` # comment` and optional surrounding quotes (the
- * frontmatter parser has already stripped them, so the raw readers must agree);
- * a blank value is absent, not null.
- */
-function classifyMilestoneScalar(raw: string | null | undefined): { explicitNull: boolean; version: string | null } {
-  if (typeof raw !== 'string') return { explicitNull: false, version: null };
-  const trimmed = raw.trim();
-  if (trimmed === '') return { explicitNull: false, version: null };
-  const bare = trimmed.replace(/\s+#.*$/, '').trim().replace(/^(['"])(.*)\1$/, '$2');
-  if (/^(?:null|Null|NULL|~)$/.test(bare)) return { explicitNull: true, version: null };
-  return { explicitNull: false, version: trimmed };
-}
-
 function extractCurrentMilestoneScoped(content: string, cwd?: string, ws?: string | null, phaseIdConvention?: string | null): { value: string; scope: Scope } {
   if (!cwd) {
     // Row 1: a deliberate unscoped read (no cwd supplied) is a real answer —
@@ -1872,14 +1872,10 @@ function getMilestoneInfo(cwd?: string): { value: MilestoneInfo | null; scope: S
     if (roadmap === null) throw new Error('missing');
 
     let stateVersion: string | null = null;
-    // #5038: distinct from `stateVersion` staying null because the
-    // `milestone:` key is simply ABSENT. Set true only when the key is
-    // PRESENT and its value is the literal text "null" — a deliberate
-    // "no milestone right now" assertion, not an unset field. This gates
-    // the ROADMAP auto-derivation fallback below: that fallback exists to
-    // BOOTSTRAP an initial milestone identity for a project that has never
-    // mentioned one, and must not silently overwrite an explicit null with
-    // a guessed one on every rewrite (`state sync`, `record-session`, ...).
+    // #5038: true only when the `milestone:` key is PRESENT and classifies as
+    // an explicit null (any spelling classifyMilestoneScalar accepts), as
+    // opposed to ABSENT. Gates the ROADMAP auto-derivation fallback, which
+    // only bootstraps a milestone for a project that never mentioned one.
     let explicitlyNoMilestone = false;
     if (cwd) {
       try {
@@ -1888,9 +1884,6 @@ function getMilestoneInfo(cwd?: string): { value: MilestoneInfo | null; scope: S
         if (stateRaw !== null) {
           const m = stateRaw.match(/^milestone:\s*(.+)/m);
           if (m) {
-            // #5038: `milestone: null` is YAML null, not the 4-character
-            // string "null" — classified by the shared owner so every reader
-            // agrees on what counts as null.
             const classified = classifyMilestoneScalar(m[1]);
             explicitlyNoMilestone = classified.explicitNull;
             stateVersion = classified.version;
@@ -1956,16 +1949,8 @@ function getMilestoneInfo(cwd?: string): { value: MilestoneInfo | null; scope: S
       return scoped({ version: stateVersion, name: null }, SCOPE.TRUNCATED);
     }
 
-    // #5038: STATE.md's `milestone:` key is PRESENT and explicitly asserts no
-    // milestone (`milestone: null`) — a deliberate assertion, not an unset
-    // field. Return null/UNSCOPED directly rather than falling into the
-    // ROADMAP auto-derivation fallback below: that fallback exists to
-    // BOOTSTRAP an initial milestone identity for a project whose STATE.md
-    // has never mentioned `milestone:` at all, and running it here would
-    // silently replace the explicit null with a guessed heading/bullet
-    // version on every rewrite (`state sync`, `record-session`, ...) —
-    // exactly the behavior the caller-side withhold in state.cts depends on
-    // NOT happening.
+    // #5038: an explicit null is a deliberate "no milestone"; do not let the
+    // auto-derivation fallback below replace it with a guessed version.
     if (explicitlyNoMilestone) {
       return scoped(null, SCOPE.UNSCOPED);
     }

@@ -2877,23 +2877,10 @@ function scanStatePhaseDirs(
 }
 
 /**
- * #5038: does existing frontmatter assert "explicitly no milestone right now"
- * (`milestone: null`) as opposed to never mentioning the `milestone:` key at
- * all? Both collapse to the same falsy `storedMilestone` below, so a
- * `typeof === 'string'` check alone cannot tell them apart.
- *
- * Traced (not assumed) before writing this: `extractFrontmatter` parses
- * frontmatter scalars under js-yaml's `FAILSAFE_SCHEMA` (src/frontmatter.cts),
- * which — unlike the default schema — never resolves the bare word `null` to
- * a real JS `null`; every scalar it does not otherwise structure is a string.
- * So `milestone: null` parses to the literal STRING `"null"`, not JS `null`
- * (only a truly blank `milestone:` value does that, via
- * `normalizeParsedValue`'s null→`{}` step — a different, rarer YAML shape
- * this issue does not cover). The present-but-non-string discriminator the
- * issue brief suggested checking for therefore does not fire here — the
- * literal string IS the signal, exactly as `getMilestoneInfo`'s own
- * raw-regex read of the same line requires the identical literal-string
- * check (mirroring gsd-statusline.js's `v === 'null' ? null : v`).
+ * #5038: does existing frontmatter assert an explicit null milestone, as
+ * opposed to omitting the `milestone:` key? `extractFrontmatter` parses under
+ * FAILSAFE_SCHEMA, so YAML null arrives as a string; classification is
+ * delegated to classifyMilestoneScalar.
  */
 function isMilestoneExplicitlyNull(existingFm: Record<string, unknown>): boolean {
   const raw = existingFm['milestone'];
@@ -2918,11 +2905,8 @@ function buildStateFrontmatter(
   storedCompletedPhases?: number | null,
   storedTotalPlans?: number | null,
   storedCompletedPlans?: number | null,
-  // #5038: was STATE.md's `milestone:` key present with an explicit YAML null
-  // ("no milestone right now"), as opposed to absent entirely (a fresh/
-  // pre-milestone project)? Both make `assertedMilestoneVersion` below null
-  // (post-#5038 getMilestoneInfo fix), but only the former needs the
-  // milestoned-but-unbounded-style withhold — see the disk-scan block.
+  // #5038: explicit `milestone: null` (vs an absent key); withholds progress
+  // counters on a sectioned ROADMAP without the unbound warning.
   milestoneExplicitlyNull?: boolean,
 ): Record<string, unknown> {
   // #2956: scope `Phase` extraction to ## Current Position (mirrors the read
@@ -3033,13 +3017,8 @@ function buildStateFrontmatter(
           // The ROADMAP scope + the deduped, milestone-scoped disk phase set:
           // one owner (scanStatePhaseDirs, above buildStateFrontmatter) so the
           // #5118 pre-write validation in `phase remove` reads exactly this set.
-          // #5038 review finding 2: `storedMilestone` is the literal string
-          // "null" for an explicit-null STATE.md (FAILSAFE_SCHEMA, see
-          // isMilestoneExplicitlyNull's doc comment), not a real milestone
-          // version. Passed raw, it would flow into listMilestonePhaseDirs'
-          // versionOverride filter and mis-scope the phase-dir set on a flat
-          // roadmap. Normalize to a real null here, the single place this
-          // value crosses into the disk-scan filter.
+          // #5038: an explicit-null `storedMilestone` is text, not a version;
+          // pass a real null so it never reaches the phase-dir version filter.
           const {
             phaseDirs,
             phaseDirScope,
@@ -3098,9 +3077,8 @@ function buildStateFrontmatter(
             let milestoneBounded = true;
             // #2828/#3642: distinguish a FLAT unmilestoned roadmap (no milestone
             // sectioning at all — only Phase headings) from a MILESTONED one
-            // (milestone/version headings exist). Computed BEFORE the
-            // boundedness gate below (#5038) so the explicit-null branch can
-            // consult it directly instead of re-deriving it twice.
+            // (milestone/version headings exist). Computed before the
+            // boundedness gate so the explicit-null branch can use it (#5038).
             // #3642: the flat test uses the >=1 sibling (hasAnyMilestoneSection),
             // not the >=2 predicate. >=2 under-answers the question this branch
             // asks: with EXACTLY ONE milestone section and an asserted milestone
@@ -3129,18 +3107,9 @@ function buildStateFrontmatter(
               // defect, design row 17).
               milestoneBounded = isMilestoneBounded(roadmapRaw, String(assertedMilestoneVersion).trim(), phaseConvention);
             } else if (milestoneExplicitlyNull && roadmapRaw !== null && roadmapHasAnyMilestoneSection) {
-              // #5038: `milestone: null` in STATE.md deliberately asserts "no
-              // milestone right now". The defect-1 fix (getMilestoneInfo's
-              // YAML-null normalization) makes `assertedMilestoneVersion` null
-              // for this case — the SAME value it holds when the `milestone:`
-              // key is absent entirely (a fresh/pre-milestone project). Those
-              // two are not the same: an absent key has no sibling milestones
-              // to conflate, but a SECTIONED ROADMAP with an explicit null has
-              // no way to know which section's phases the whole-document/
-              // on-disk count would represent. Treat it like the
-              // asserted-but-unbound case for the withhold gate below —
-              // WITHOUT the #3354/#3642 warning below, since an explicit null
-              // is a deliberate assertion, not an error.
+              // #5038: explicit null on a sectioned ROADMAP: no section owns
+              // the counts, so treat as unbound for the withhold gate (the
+              // warning below is skipped, null is deliberate).
               milestoneBounded = false;
             }
             // #2828: on a flat roadmap the whole-doc count is correct (no
@@ -3167,10 +3136,7 @@ function buildStateFrontmatter(
             // The degenerate un-sectioned zero-heading case keeps the
             // phaseDirs.length fallback — with nothing declared anywhere else,
             // the disk count is the only source and remains correct.
-            // #5038: exclude the explicit-null case from the warned branch —
-            // it is withheld too (explicitNullWithheld below), but silently,
-            // since an explicit null is a deliberate "no milestone" assertion
-            // rather than an unresolved/erroneous one.
+            // #5038: explicit null is withheld silently (explicitNullWithheld).
             const milestonedButUnbounded = !milestoneBounded && roadmapHasAnyMilestoneSection && !milestoneExplicitlyNull;
             if (milestonedButUnbounded) {
               process.stderr.write(
@@ -3188,15 +3154,7 @@ function buildStateFrontmatter(
             // value instead. Without an asserted milestone (fresh project,
             // pre-roadmap) the disk count is still the only source and stays
             // authoritative (the #3354 doctrine's degenerate case).
-            // #5038: exclude the explicit-null case — `storedMilestone` is the
-            // literal string "null" here (FAILSAFE_SCHEMA, see
-            // isMilestoneExplicitlyNull's doc comment), which is a non-empty
-            // string but not a real asserted version; without this exclusion
-            // an explicit `milestone: null` with ROADMAP.md absent would emit
-            // the #3573 warning naming the literal text "null" as if it were
-            // a real asserted milestone. With no ROADMAP at all there are no
-            // milestone sections to conflate with either, so this combination
-            // simply falls through to the pre-existing "no milestone" path.
+            // #5038: an explicit null is not an asserted milestone.
             const roadmapAbsentWithAssertedMilestone =
               roadmapRaw === null &&
               typeof storedMilestone === 'string' &&
@@ -3216,12 +3174,7 @@ function buildStateFrontmatter(
             // Pre-#4094 only totalPhases was nulled here, so every resyncing
             // write silently clobbered the three stored siblings with the
             // under-scoped disk numbers.
-            // #5038: the silent (no-warning) explicit-null sibling of
-            // milestonedButUnbounded — same withhold rationale (a sectioned
-            // ROADMAP gives no way to know which section's phases an explicit
-            // "no milestone" should report), just without the #3354/#3642
-            // warning text, since this is a deliberate assertion, not an
-            // unresolved/erroneous one.
+            // #5038: silent sibling of milestonedButUnbounded.
             const explicitNullWithheld = milestoneExplicitlyNull && !milestoneBounded && roadmapHasAnyMilestoneSection;
             const diskCountsWithheld = milestonedButUnbounded || roadmapAbsentWithAssertedMilestone || explicitNullWithheld;
             // #4129: floor the completed-phases numerator at the ROADMAP's own
@@ -6297,10 +6250,6 @@ function cmdStateSync(cwd: string, options: StateSyncOptions | undefined, raw: b
   // sync-test shape) are unaffected: the gate only fires when a version is asserted.
   const syncFm = extractFrontmatter(content, statePath) as Record<string, unknown>;
   const fmVersion = syncFm.milestone;
-  // #5038 review finding 3: reuse the single owner of "is this frontmatter's
-  // milestone key an explicit YAML null" rather than re-deriving the same
-  // literal-string check inline (they had already drifted into two call
-  // sites parsing the identical FAILSAFE_SCHEMA shape).
   const milestoneExplicitlyNull = isMilestoneExplicitlyNull(syncFm);
   const versionStr = typeof fmVersion === 'string' && fmVersion.trim() && !milestoneExplicitlyNull ? fmVersion.trim() : null;
   let milestoneBounded = true;
@@ -6311,11 +6260,7 @@ function cmdStateSync(cwd: string, options: StateSyncOptions | undefined, raw: b
     // extension on top inside isMilestoneBounded.
     milestoneBounded = isMilestoneBounded(syncRoadmapRaw, versionStr, syncConvention);
   } else if (milestoneExplicitlyNull && syncRoadmapRaw !== null && hasAnyMilestoneSection(syncRoadmapRaw)) {
-    // #5038: mirror buildStateFrontmatter's explicit-null withhold — a
-    // sectioned ROADMAP gives no way to know which milestone's phases the
-    // whole-document percent would represent, so skip it exactly like the
-    // asserted-but-unbound case, without that case's warning (an explicit
-    // null is a deliberate assertion, not an error).
+    // #5038: mirror buildStateFrontmatter's silent explicit-null withhold.
     milestoneBounded = false;
   }
   let percent: number | null = null;

@@ -3059,7 +3059,7 @@ describe('cmdStateUpdateProgress (state update-progress)', () => {
     fs.writeFileSync(
       path.join(tmpDir, '.planning', 'STATE.md'),
       ['---', 'gsd_state_version: "1.0"', 'milestone: null', 'status: executing', '---', '',
-        '# Project State', '', '**Progress:** [░░░░░░░░░░] 0%', ''].join('\n')
+        '# Project State', '', '**Progress:** [██████████] 100%', ''].join('\n')
     );
     const phase01Dir = path.join(tmpDir, '.planning', 'phases', '01');
     fs.mkdirSync(phase01Dir, { recursive: true });
@@ -3077,6 +3077,10 @@ describe('cmdStateUpdateProgress (state update-progress)', () => {
     const output = JSON.parse(rec.stdout);
     assert.strictEqual(output.updated, true, `scope gate must not withhold; got ${rec.stdout}`);
     assert.strictEqual(output.total, 1);
+    const persisted = fs.readFileSync(path.join(tmpDir, '.planning', 'STATE.md'), 'utf8');
+    assert.match(persisted, /^milestone: null$/m, 'the explicit null is preserved');
+    assert.ok(persisted.includes(`**Progress:** ${output.bar}`), `body bar must equal the reported bar ${output.bar}`);
+    assert.doesNotMatch(persisted, /100%/, 'the seeded stale bar was replaced');
   });
 });
 
